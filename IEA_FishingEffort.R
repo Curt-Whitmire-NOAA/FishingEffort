@@ -7,6 +7,7 @@ library(tidyr)
 library(tidyselect)
 library(dplyr)
 library(sf)
+library(zoo)
 
 tic("data preparation") # Start the clock!
 # Set working directory
@@ -33,7 +34,7 @@ grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Set up for user input
 grdSz <- substring(colnames(grd)[4],8,9)
 
 # Filter for desired year range and Update attribute table
-yrSrt <- 2002 # Set up for user input
+yrSrt <- 2013 # Set up for user input
 yrEnd <- 2018 # Set up for user input
 
 tlTM <- tlTMfc %>% 
@@ -96,6 +97,21 @@ summ3 <- as.data.frame(isct) %>%
             ) %>% 
   mutate(CellSz = paste0(grdSz,"-km")) %>% 
   select(CellSz, everything())
+
+# Create summary table by 5-yr increments
+incr = 5 # Include in function as user input
+summ4 <- as.data.frame(isct) %>% 
+  group_by(CellID, TowYr) %>% 
+  summarise(sumLen = sum(partLen),
+            sumDur = sum(partDur),
+            cntTow = n_distinct(HAUL_ID),
+            cntVes = n_distinct(DRVID) 
+            ) %>% 
+  mutate(len5sum=rollsum(sumLen,incr,align='right',fill=NA),
+         len5mean=rollmean(sumLen,incr,align='right',fill=NA),
+         tow5sum=rollsum(cntTow,incr,align='right',fill=NA),
+         ves5min=rollapply(cntVes,incr,min,align='right',fill=NA)
+  )
 
 # Use tidyr pivot_wider create wide data frame
 pivLen <- summ2 %>% 
