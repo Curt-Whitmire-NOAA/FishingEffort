@@ -1,18 +1,32 @@
-library(tictoc)
-tic.clearlog()
-tic("total") # Start the clock!
+# Script:   IEA_FishingEffort.R
+# Author:   Curt Whitmire (NOAA Fisheries)
+# Date:     2 Jan 2020
+# Purpose:  Summarize fishing effort, represented by line featues, into
+#           rectilinear grids of specified size
 
-# Load required libraries
-library(tidyr)
-library(tidyselect)
-library(dplyr)
-library(sf)
-library(zoo)
+# Specify the required packages
+packages = c("tictoc","tidyr","tidyselect", "dplyr", "sf", "zoo", "rstudioapi")
 
-tic("data preparation") # Start the clock!
+#use this function to check if each package is on the local machine
+#if a package is installed, it will be loaded
+#if any are not, the missing package(s) will be installed and loaded
+#function provided by Vikram Baliga, July 19, 2015
+package.check <- lapply(packages, FUN = function(x) {
+  if (!require(x, character.only = TRUE)) {
+    install.packages(x, dependencies = TRUE)
+    library(x, character.only = TRUE)
+  }
+})
+
+# Verify all required packages are loaded
+search()
+
+titic.clearlog()
+tic("total") # Start the clock
+tic("data preparation") # Start the subclock
+
 # Set working directory
 dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
-# library(rstudioapi)
 # current_path <- getActiveDocumentContext()$path
 # setwd(dirname(current_path))
 
@@ -45,14 +59,6 @@ tlTM <- tlTMfc %>%
     ) %>% 
   filter(TowYr >= yrSrt, TowYr <= yrEnd)
 
-# # Create columns with 5-yr intervals
-# library(lubridate)
-# tl.summ <- tl %>% 
-#   filter(TowDate>=as.Date('2002-01-01')) %>% 
-#   # group_by(by5=cut(TowDate, "5 year")) # create column with 5-yr interval using cut
-#   # group_by(by5=cut(TowDate, "5 year")) # create column with 5-yr interval using lubridate interval
-#   mutate(y02_06="y02_06") # create 5-yr fields the old-fashined way, using filter and mutate
-
 # Create summary table by Year
 summ1 <- as.data.frame(tlTM) %>% 
   group_by(TowYr) %>% 
@@ -64,8 +70,8 @@ summ1 <- as.data.frame(tlTM) %>%
 
 toc(log = TRUE, quiet = TRUE) # End subclock
 log.txt <- tic.log(format = TRUE)
+tic("data geoprocessing") # Start the subclock
 
-tic("data geoprocessing") # Start the clock!
 # Calculate intersection of towlines within Grid Cells
 isct <- st_intersection(tlTM, grd) %>% 
   mutate(partLen = st_length(.),
@@ -75,8 +81,8 @@ isct <- st_intersection(tlTM, grd) %>%
 
 toc(log = TRUE, quiet = TRUE) # End subclock
 log.txt <- tic.log(format = TRUE)
+tic("data summarization") # Start the subclock
 
-tic("data summarization") # Start the clock!
 # Create summary table by CellID and Year
 summ2 <- as.data.frame(isct) %>% 
   group_by(CellID, TowYr) %>% 
@@ -98,22 +104,7 @@ summ3 <- as.data.frame(isct) %>%
   mutate(CellSz = paste0(grdSz,"-km")) %>% 
   select(CellSz, everything())
 
-# Create summary table by 5-yr increments
-incr = 5 # Include in function as user input
-summ4 <- as.data.frame(isct) %>% 
-  group_by(CellID, TowYr) %>% 
-  summarise(sumLen = sum(partLen),
-            sumDur = sum(partDur),
-            cntTow = n_distinct(HAUL_ID),
-            cntVes = n_distinct(DRVID) 
-            ) %>% 
-  mutate(len5sum=rollsum(sumLen,incr,align='right',fill=NA),
-         len5mean=rollmean(sumLen,incr,align='right',fill=NA),
-         tow5sum=rollsum(cntTow,incr,align='right',fill=NA),
-         ves5min=rollapply(cntVes,incr,min,align='right',fill=NA)
-  )
-
-# Use tidyr pivot_wider create wide data frame
+# Use tidyr pivot_wider create wide data frames for yearly summary
 pivLen <- summ2 %>% 
   select(-sumDur, -cntTow, -cntVes) %>% 
   pivot_wider(names_from = TowYr, 
@@ -135,27 +126,81 @@ pivVes <- summ2 %>%
               names_prefix = "ves") %>% 
   select(CellID, sort(tidyselect::peek_vars()))
 
-# Join 3 tables (Vessel Counts, Cell Lengths, Cell Durations)
-jn <- pivVes %>% 
+# Join 3 tables (Vessel Counts, Cell Lengths, Cell Durations) for yearly summary
+jn1yr <- pivVes %>% 
   full_join(pivLen, by = "CellID") %>% 
   full_join(pivDur, by = "CellID") %>% 
   mutate(CellSz = paste0(grdSz,"-km")) %>% 
   select(CellSz, CellID, everything())
 
-toc(log = TRUE, quiet = TRUE) # End subclock
-log.txt <- tic.log(format = TRUE)
+# Create summary table by 5-yr increments
+incr = 5 # Include in function as user input
+f1 <- function(x) sum(x > 2) / incr
+summ4 <- as.data.frame(isct) %>% 
+  group_by(CellID, TowYr) %>% 
+  summarise(sumLen = sum(partLen),
+            sumDur = sum(partDur),
+            cntTow = n_distinct(HAUL_ID),
+            cntVes = n_distinct(DRVID) 
+  ) %>% 
+  mutate(len5sum=rollsum(sumLen,incr,align='right',fill=NA),
+         len5mean=rollmean(sumLen,incr,align='right',fill=NA),
+         dur5sum=rollsum(sumDur,incr,align='right',fill=NA),
+         dur5mean=rollmean(sumDur,incr,align='right',fill=NA),
+         tow5sum=rollsum(cntTow,incr,align='right',fill=NA),
+         ves5yrs=rollapply(cntVes,incr,FUN=f1,align='right',fill=NA)
+         ) %>% 
+  select(-sumLen, -sumDur, -cntTow, -cntVes)
 
-# Output to CSV file for joining to Polygon features OR join here and output to FileGDB using st_write
+# Use tidyr pivot_wider create wide data frames for 5-yr summary
+pivLen5 <- summ4 %>% 
+  select(-len5mean, -dur5sum, -dur5mean, -tow5sum, -ves5yrs) %>% 
+  pivot_wider(names_from = TowYr, 
+              values_from = len5sum,
+              names_prefix = "len") %>% 
+  select(CellID, sort(tidyselect::peek_vars())) %>% 
+  select_if(~!all(is.na(.)))
+
+pivDur5 <- summ4 %>% 
+  select(-len5sum, -len5mean, -dur5mean, -tow5sum, -ves5yrs) %>% 
+  pivot_wider(names_from = TowYr, 
+              values_from = dur5sum,
+              names_prefix = "dur") %>% 
+  select(CellID, sort(tidyselect::peek_vars())) %>% 
+  select_if(~!all(is.na(.)))
+
+pivVes5 <- summ4 %>% 
+  select(-len5sum, -len5mean, -dur5sum, -dur5mean, -tow5sum) %>% 
+  pivot_wider(names_from = TowYr, 
+              values_from = ves5yrs,
+              names_prefix = "ves") %>% 
+  select(CellID, sort(tidyselect::peek_vars())) %>% 
+  select_if(~!all(is.na(.)))
+
+# Join 3 tables (Vessel Minimum Counts, Cell Lengths, Cell Durations) for 5-yr summary
+jn5yr <- pivVes5 %>% 
+  full_join(pivLen5, by = "CellID") %>% 
+  full_join(pivDur5, by = "CellID") %>% 
+  mutate(CellSz = paste0(grdSz,"-km")) %>% 
+  select(CellSz, CellID, everything()) %>% 
+  filter_at(vars(-CellSz, -CellID), any_vars(!is.na(.)))
+
+# Output to CSV files for joining to Polygon features OR join here and output to FileGDB using st_write
 setwd(paste0(dir, "/Data"))
-fp <- paste0("LB", substring(yrSrt,3,4), substring(yrEnd,3,4), "_iden", grdSz, "km_1yr")
+fp <- paste0("LB", substring(yrSrt,3,4), substring(yrEnd,3,4), "_iden", grdSz)
 
-write.csv(jn, 
-          file = paste0(fp, ".csv"), 
+write.csv(jn1yr, 
+          file = paste0(fp, "km_1yr.csv"), 
+          na = "0")
+write.csv(jn5yr, 
+          file = paste0(fp, "km_5yr.csv"), 
           na = "0")
 write.csv(summ3, 
-          file = paste0(fp, "_summ.csv"), 
+          file = paste0(fp, "km_1yr_summ.csv"), 
           na = "0")
 
+toc(log = TRUE, quiet = TRUE) # End subclock
+log.txt <- tic.log(format = TRUE)
 toc(log = TRUE, quiet = TRUE) # End clock
 log.txt <- tic.log(format = TRUE)
 
@@ -165,6 +210,8 @@ fileConn <- file(log)
 writeLines(unlist(log.txt), con = fileConn)
 close(fileConn)
 
-rm(grd,isct,jn,log.txt,pivDur,pivLen,pivVes,summ2,summ3,tlTM,fileConn,fp,grdSz,log,yrEnd,yrSrt)
-
+# Clear process log
 tic.clearlog()
+
+# Delete temporary variables except input lines
+rm(list=setdiff(ls(), "tlTMfc"))
