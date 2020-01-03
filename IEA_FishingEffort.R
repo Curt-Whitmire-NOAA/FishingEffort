@@ -5,7 +5,7 @@
 #           rectilinear grids of specified size
 
 # Specify the required packages
-packages = c("tictoc","tidyr","tidyselect", "dplyr", "sf", "zoo", "rstudioapi")
+packages = c("tictoc", "tidyr", "tidyselect", "dplyr", "sf", "zoo", "rstudioapi")
 
 #use this function to check if each package is on the local machine
 #if a package is installed, it will be loaded
@@ -45,10 +45,10 @@ if (exists("tlTMfc")) {
 # tlTMfc <- st_transform(x=tl_dens, crs=projcrs) # Project haul data to TM spatial object
 
 grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Set up for user input
-grdSz <- substring(colnames(grd)[4],8,9)
+grdSz <- substring(colnames(grd)[4], 8, 9)
 
 # Filter for desired year range and Update attribute table
-yrSrt <- 2013 # Set up for user input
+yrSrt <- 2002 # Set up for user input
 yrEnd <- 2018 # Set up for user input
 
 tlTM <- tlTMfc %>% 
@@ -143,19 +143,21 @@ summ4 <- as.data.frame(isct) %>%
             cntTow = n_distinct(HAUL_ID),
             cntVes = n_distinct(DRVID) 
   ) %>% 
-  mutate(len5sum=rollsum(sumLen,incr,align='right',fill=NA),
-         len5mean=rollmean(sumLen,incr,align='right',fill=NA),
-         dur5sum=rollsum(sumDur,incr,align='right',fill=NA),
-         dur5mean=rollmean(sumDur,incr,align='right',fill=NA),
-         tow5sum=rollsum(cntTow,incr,align='right',fill=NA),
-         ves5yrs=rollapply(cntVes,incr,FUN=f1,align='right',fill=NA)
+  mutate(TowYrSrt = TowYr - incr + 1,
+         len5sum = rollsum(sumLen, incr, align = 'right', fill = NA),
+         len5mean = rollmean(sumLen, incr, align = 'right', fill = NA),
+         dur5sum = rollsum(sumDur, incr, align = 'right', fill = NA),
+         dur5mean = rollmean(sumDur, incr, align = 'right', fill = NA),
+         tow5sum = rollsum(cntTow, incr, align = 'right', fill = NA),
+         ves5yrs = rollapply(cntVes, incr, FUN = f1, align = 'right', fill = NA)
          ) %>% 
   select(-sumLen, -sumDur, -cntTow, -cntVes)
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
 pivLen5 <- summ4 %>% 
   select(-len5mean, -dur5sum, -dur5mean, -tow5sum, -ves5yrs) %>% 
-  pivot_wider(names_from = TowYr, 
+  pivot_wider(names_from = c(TowYrSrt, TowYr),
+              names_sep = "_",
               values_from = len5sum,
               names_prefix = "len") %>% 
   select(CellID, sort(tidyselect::peek_vars())) %>% 
@@ -163,7 +165,8 @@ pivLen5 <- summ4 %>%
 
 pivDur5 <- summ4 %>% 
   select(-len5sum, -len5mean, -dur5mean, -tow5sum, -ves5yrs) %>% 
-  pivot_wider(names_from = TowYr, 
+  pivot_wider(names_from = c(TowYrSrt, TowYr),
+              names_sep = "_",
               values_from = dur5sum,
               names_prefix = "dur") %>% 
   select(CellID, sort(tidyselect::peek_vars())) %>% 
@@ -171,7 +174,8 @@ pivDur5 <- summ4 %>%
 
 pivVes5 <- summ4 %>% 
   select(-len5sum, -len5mean, -dur5sum, -dur5mean, -tow5sum) %>% 
-  pivot_wider(names_from = TowYr, 
+  pivot_wider(names_from = c(TowYrSrt, TowYr),
+              names_sep = "_",
               values_from = ves5yrs,
               names_prefix = "ves") %>% 
   select(CellID, sort(tidyselect::peek_vars())) %>% 
@@ -181,13 +185,13 @@ pivVes5 <- summ4 %>%
 jn5yr <- pivVes5 %>% 
   full_join(pivLen5, by = "CellID") %>% 
   full_join(pivDur5, by = "CellID") %>% 
-  mutate(CellSz = paste0(grdSz,"-km")) %>% 
+  mutate(CellSz = paste0(grdSz, "-km")) %>% 
   select(CellSz, CellID, everything()) %>% 
   filter_at(vars(-CellSz, -CellID), any_vars(!is.na(.)))
 
 # Output to CSV files for joining to Polygon features OR join here and output to FileGDB using st_write
 setwd(paste0(dir, "/Data"))
-fp <- paste0("LB", substring(yrSrt,3,4), substring(yrEnd,3,4), "_iden", grdSz)
+fp <- paste0("LB", substring(yrSrt, 3, 4), substring(yrEnd, 3, 4), "_iden", grdSz)
 
 write.csv(jn1yr, 
           file = paste0(fp, "km_1yr.csv"), 
@@ -205,7 +209,7 @@ toc(log = TRUE, quiet = TRUE) # End clock
 log.txt <- tic.log(format = TRUE)
 
 # Write elapsed code section times to log file
-log <- paste0(fp, "_log.txt")
+log <- paste0(fp, "km_log.txt")
 fileConn <- file(log)
 writeLines(unlist(log.txt), con = fileConn)
 close(fileConn)
