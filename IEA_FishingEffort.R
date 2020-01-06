@@ -153,7 +153,8 @@ summ4 <- as.data.frame(isct) %>%
          tow5sum = rollapply(cntTow, incr, sum, partial=TRUE, align = 'right', fill = NA),
          ves5yrs = rollapply(cntVes, incr, FUN = fun.prop, partial=TRUE, align = 'right', fill = NA)
          ) %>% 
-  select(-sumLen, -sumDur, -cntTow, -cntVes) 
+  select(-sumLen, -sumDur, -cntTow, -cntVes) %>% 
+  filter(TowYr - TowYrSrt >= incr - 1)
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
 pivLen5 <- summ4 %>% 
