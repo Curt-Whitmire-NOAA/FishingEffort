@@ -1,8 +1,9 @@
 # Script:   IEA_FishingEffort.R
 # Author:   Curt Whitmire (NOAA Fisheries)
-# Date:     2 Jan 2020
+# Date:     6 Jan 2020
 # Purpose:  Summarize fishing effort, represented by line features, into
-#           Cartesian grids of specified size
+#           Cartesian grids of specified size.
+#           Summarize by 1-yr and 5-yr increments
 
 # Specify the required packages
 packages = c("tictoc", "tidyr", "tidyselect", "dplyr", "sf", "zoo", "rstudioapi")
