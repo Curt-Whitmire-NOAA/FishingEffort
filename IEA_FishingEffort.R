@@ -153,7 +153,8 @@ summ4 <- as.data.frame(isct) %>%
          tow5sum = rollapply(cntTow, incr, sum, partial=TRUE, align = 'right', fill = NA),
          ves5yrs = rollapply(cntVes, incr, FUN = fun.prop, partial=TRUE, align = 'right', fill = NA)
          ) %>% 
-  select(-sumLen, -sumDur, -cntTow, -cntVes)
+  select(-sumLen, -sumDur, -cntTow, -cntVes) %>% 
+  filter(TowYr - TowYrSrt >= incr - 1)
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
 pivLen5 <- summ4 %>% 
@@ -184,17 +185,12 @@ pivVes5 <- summ4 %>%
   select_if(~!all(is.na(.)))
 
 # Join 3 tables (Vessel Counts, Cell Lengths, Cell Durations) for 5-yr summary
-fun.cond2 <- function(x){ as.numeric(substr(y,9,12)) - as.numeric(substr(y,4,7)) >= (incr-1) }
-
 jn5yr <- pivVes5 %>% 
   full_join(pivLen5, by = "CellID") %>% 
   full_join(pivDur5, by = "CellID") %>% 
   mutate(CellSz = grdSz) %>% 
   select(CellSz, CellID, everything()) %>% 
   filter_at(vars(-CellSz, -CellID), any_vars(!is.na(.))) 
-
-# %>% 
-#   select_if(fun.cond2)
 
 # Output to CSV files for later joining to polygon features
 # OR join here and output to FileGDB using st_write
