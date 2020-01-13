@@ -49,7 +49,7 @@ grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Include as user input
 grdSz <- substring(colnames(grd)[4], 8)
 
 # Filter for desired year range and Update attribute table
-yrSrt <- 2002 # Include as user input
+yrSrt <- 2014 # Include as user input
 yrEnd <- 2018 # Include as user input
 
 tlTM <- tlTMfc %>% 
@@ -135,6 +135,7 @@ jn1yr <- pivVes %>%
   select(CellSz, CellID, everything())
 
 # Create summary table by 5-yr increments
+# Need to modify code to first select 5-yr data, then calculate n_distinct(DRVID), then summarise. Maybe use lapply for all overlapping 5-yr windows
 incr = 5 # Include as user input
 fun.prop <- function(x) sum(x > 2) / incr
 fun.cond1 <- function(x){ ifelse(x < (yrSrt+incr), yrSrt, x - incr + 1) }
@@ -147,15 +148,74 @@ summ4 <- as.data.frame(isct) %>%
             cntVes = n_distinct(DRVID) 
   ) %>% 
   mutate(TowYrSrt = fun.cond1(TowYr),
-         len5sum = rollapply(sumLen, incr, sum, partial=TRUE, align = 'right', fill = NA),
-         len5mean = rollapply(sumLen, incr, mean, partial=TRUE, align = 'right', fill = NA),
-         dur5sum = rollapply(sumDur, incr, sum, partial=TRUE, align = 'right', fill = NA),
-         dur5mean = rollapply(sumDur, incr, mean, partial=TRUE, align = 'right', fill = NA),
-         tow5sum = rollapply(cntTow, incr, sum, partial=TRUE, align = 'right', fill = NA),
-         ves5yrs = rollapply(cntVes, incr, FUN = fun.prop, partial=TRUE, align = 'right', fill = NA)
-         ) %>% 
-  select(-sumLen, -sumDur, -cntTow, -cntVes) %>% 
-  filter(TowYr - TowYrSrt >= incr - 1)
+         len5sum = rollapply(sumLen, incr, sum, partial=TRUE, align = 'right'),
+         len5mean = rollapply(sumLen, incr, mean, partial=TRUE, align = 'right'),
+         dur5sum = rollapply(sumDur, incr, sum, partial=TRUE, align = 'right'),
+         dur5mean = rollapply(sumDur, incr, mean, partial=TRUE, align = 'right'),
+         tow5sum = rollapply(cntTow, incr, sum, partial=TRUE, align = 'right'),
+         ves5yrs = rollapply(cntVes, incr, FUN = fun.prop, partial=TRUE, align = 'right')
+         ) %>%
+  select(-sumLen, -sumDur, -cntTow, -cntVes)
+# %>% 
+#   filter(TowYr - TowYrSrt >= incr - 1)
+
+#### Start of Working code for calculating # of distinct vessels in 5-yr periods
+# from:
+# https://stackoverflow.com/questions/41183693/r-rolling-sliding-window-and-distinct-count-in-r-for-sliding-number-of-days
+all_combs <- expand.grid(CellID=unique(isct$CellID), 
+                                DRVID=unique(isct$DRVID), 
+                                TowYr=seq(min(isct$TowYr), max(isct$TowYr), by=1))
+
+df <- merge(as.data.frame(isct), all_combs, by=c('CellID','DRVID','TowYr'), all=TRUE)
+
+# summ4b <- as.data.frame(isct) %>% 
+#   group_by(CellID, TowYr) %>% 
+#   mutate(TowYrSrt = fun.cond1(TowYr),
+#          len5sum = rollapply(partLen, incr, sum, partial=TRUE, align = 'right'),
+#          dur5sum = rollapply(partDur, incr, sum, partial=TRUE, align = 'right'),
+#          uHAULID= rollapply(HAUL_ID, incr, FUN=function(x) length(unique(x)), partial=TRUE, align='right'),
+#          uDRVID= rollapply(DRVID, incr, FUN=function(x) length(unique(x)), partial=TRUE, align='right')
+#          ) %>%
+#   filter(!is.na(DRVID)) %>% 
+#   select(-HAUL_ID, -DRVID, -partLen, -partDur)
+
+summ4b <- as.data.frame(isct) %>% 
+  group_by(CellID, TowYr, DRVID) %>% 
+  summarise(sumLen = sum(partLen),
+            sumDur = sum(partDur),
+            cntTow = n_distinct(HAUL_ID)
+            )
+
+summ4c <- summ4b %>%
+  group_by(CellID, TowYr) %>% 
+  mutate(TowYrSrt = fun.cond1(TowYr),
+         len5sum = rollapply(sumLen, incr, sum, partial=TRUE, align = 'right'),
+         dur5sum = rollapply(sumDur, incr, sum, partial=TRUE, align = 'right'),
+         uHAULID= rollapply(cntTow, incr, sum, partial=TRUE, align = 'right'),
+         uDRVID= rollapply(DRVID, incr, FUN=function(x) length(unique(x)), partial=TRUE, align='right')
+         ) %>%
+  filter(!is.na(DRVID)) 
+# %>%
+#   select(-HAUL_ID, -DRVID, -partLen, -partDur)
+
+# End Stack Overflow work
+
+summ4c <- summ4b %>% 
+  group_by(CellID, TowYr) %>% 
+  summarise(sumLen = sum(len5sum),
+            sumDur = sum(dur5sum),
+            cntTow = n_distinct(HAUL_ID),
+            cntVes = max(ves5yrs)
+  )
+
+pivVes5b <- summ4b %>% 
+  select(CellID, TowYr, ves5yrs) %>% 
+  pivot_wider(names_from = TowYr,
+              values_from = ves5yrs,
+              names_prefix = "ves") %>% 
+  select(CellID, sort(tidyselect::peek_vars())) %>% 
+  select_if(~!all(is.na(.)))
+##### End of Working code
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
 pivLen5 <- summ4 %>% 
