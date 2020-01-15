@@ -27,16 +27,18 @@ tic("total") # Start the clock
 tic("data preparation") # Start the subclock
 
 # Set working directory
-dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
-# current_path <- getActiveDocumentContext()$path
+# dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
+library(rstudioapi)
+current_path <- getActiveDocumentContext()$path
 # setwd(dirname(current_path))
+dir <- dirname(current_path)
 
 # Import feature classes and set input variables
 gdb <- paste0(dir, "/", "IEA_FishingEffort_through2018.gdb")
 
 if (exists("tlTMfc")) {
 } else {
-  tlTMfc <- sf::st_read(dsn=gdb, layer = "LB0218_TL_Final_TM")
+  tlTMfc <- sf::st_read(dsn=gdb, layer = "LB0218_TL_Final_TM_merge")
 }
   
 # library(smoothr) # for densifying unprojected lines
@@ -58,15 +60,15 @@ tlTM <- tlTMfc %>%
     TowYr = as.numeric(format(TowDate, "%Y")),
     origLen = st_length(tlTMfc)
     ) %>% 
-  filter(TowYr >= yrSrt, TowYr <= yrEnd)
+  filter(TowYr >= yrSrt, TowYr <= yrEnd, DUR > 0, Shape_Length > 0)
 
 # Create summary table by Year
 summ1 <- as.data.frame(tlTM) %>% 
   group_by(TowYr) %>% 
-  summarise(totLen = sum(origLen),
-            totDur = sum(DUR),
+  summarise(sumLen = sum(origLen), # first check for negative values
+            sumDur = sum(DUR), # first check for negative values
             cntTow = n_distinct(HAUL_ID),
-            numVes = n_distinct(DRVID)
+            cntVes = n_distinct(DRVID)
             )
 
 toc(log = TRUE, quiet = TRUE) # End subclock
@@ -78,7 +80,7 @@ isct <- st_intersection(tlTM, grd) %>%
   mutate(partLen = st_length(.),
          propLen = partLen/origLen,
          partDur = propLen*DUR) %>% 
-  select(CellID, CentroidLonDD, CentroidLatDD, TowYr, HAUL_ID, DRVID, partLen, partDur)
+  select(CellID, CentroidLonDD, CentroidLatDD, TowYr, HAUL_ID, DRVID, DRVIDINT, partLen, partDur)
 
 toc(log = TRUE, quiet = TRUE) # End subclock
 log.txt <- tic.log(format = TRUE)
@@ -138,111 +140,125 @@ jn1yr <- pivVes %>%
 # Need to modify code to first select 5-yr data, then calculate n_distinct(DRVID), then summarise. Maybe use lapply for all overlapping 5-yr windows
 incr = 5 # Include as user input
 fun.prop <- function(x) sum(x > 2) / incr
-fun.cond1 <- function(x){ ifelse(x < (yrSrt+incr), yrSrt, x - incr + 1) }
+fun.yrSrt <- function(x){ ifelse(x < (yrSrt+incr), yrSrt, x - incr + 1) }
 
-summ4 <- as.data.frame(isct) %>% 
-  group_by(CellID, TowYr) %>% 
-  summarise(sumLen = sum(partLen),
-            sumDur = sum(partDur),
-            cntTow = n_distinct(HAUL_ID),
-            cntVes = n_distinct(DRVID) 
-  ) %>% 
-  mutate(TowYrSrt = fun.cond1(TowYr),
-         len5sum = rollapply(sumLen, incr, sum, partial=TRUE, align = 'right'),
-         len5mean = rollapply(sumLen, incr, mean, partial=TRUE, align = 'right'),
-         dur5sum = rollapply(sumDur, incr, sum, partial=TRUE, align = 'right'),
-         dur5mean = rollapply(sumDur, incr, mean, partial=TRUE, align = 'right'),
-         tow5sum = rollapply(cntTow, incr, sum, partial=TRUE, align = 'right'),
-         ves5yrs = rollapply(cntVes, incr, FUN = fun.prop, partial=TRUE, align = 'right')
-         ) %>%
-  select(-sumLen, -sumDur, -cntTow, -cntVes)
-# %>% 
-#   filter(TowYr - TowYrSrt >= incr - 1)
+#### Start of OLD method that summarizes number of years where # unique vessels > 2
+# summ4 <- as.data.frame(isct) %>% 
+#   group_by(CellID, TowYr) %>% 
+#   summarise(sumLen = sum(partLen),
+#             sumDur = sum(partDur),
+#             cntTow = n_distinct(HAUL_ID),
+#             cntVes = n_distinct(DRVID) 
+#   ) %>% 
+#   mutate(TowYrSrt = fun.yrSrt(TowYr),
+#          len5sum = rollapply(sumLen, incr, sum, partial=TRUE, align = 'right'),
+#          # len5mean = rollapply(sumLen, incr, mean, partial=TRUE, align = 'right'),
+#          dur5sum = rollapply(sumDur, incr, sum, partial=TRUE, align = 'right'),
+#          # dur5mean = rollapply(sumDur, incr, mean, partial=TRUE, align = 'right'),
+#          tow5sum = rollapply(cntTow, incr, sum, partial=TRUE, align = 'right'),
+#          ves5yrs = rollapply(cntVes, incr, FUN = fun.prop, partial=TRUE, align = 'right')
+#          ) %>%
+#   select(-sumLen, -sumDur, -cntTow, -cntVes)
+# # %>% 
+# #   filter(TowYr - TowYrSrt >= incr - 1)
+# 
+# # Use tidyr pivot_wider create wide data frames for 5-yr summary
+# pivVes5 <- summ4 %>% 
+#   select(-len5sum, -dur5sum, -tow5sum) %>% 
+#   pivot_wider(names_from = c(TowYrSrt, TowYr),
+#               names_sep = "_",
+#               values_from = ves5yrs,
+#               names_prefix = "ves") %>% 
+#   select(CellID, sort(tidyselect::peek_vars())) %>% 
+#   select_if(~!all(is.na(.)))
+# 
+# pivLen5 <- summ4 %>% 
+#   select(-dur5sum, -tow5sum, -ves5yrs) %>% 
+#   pivot_wider(names_from = c(TowYrSrt, TowYr),
+#               names_sep = "_",
+#               values_from = len5sum,
+#               names_prefix = "len") %>% 
+#   select(CellID, sort(tidyselect::peek_vars())) %>%
+#   select_if(~!all(is.na(.)))
+# 
+# pivDur5 <- summ4 %>% 
+#   select(-len5sum, -tow5sum, -ves5yrs) %>% 
+#   pivot_wider(names_from = c(TowYrSrt, TowYr),
+#               names_sep = "_",
+#               values_from = dur5sum,
+#               names_prefix = "dur") %>% 
+#   select(CellID, sort(tidyselect::peek_vars())) %>% 
+#   select_if(~!all(is.na(.)))
+#### End of OLD method that summarizes number of years where # unique vessels > 2
 
 #### Start of Working code for calculating # of distinct vessels in 5-yr periods
 # from:
 # https://stackoverflow.com/questions/41183693/r-rolling-sliding-window-and-distinct-count-in-r-for-sliding-number-of-days
-all_combs <- expand.grid(CellID=unique(isct$CellID), 
-                                DRVID=unique(isct$DRVID), 
-                                TowYr=seq(min(isct$TowYr), max(isct$TowYr), by=1))
-
-df <- merge(as.data.frame(isct), all_combs, by=c('CellID','DRVID','TowYr'), all=TRUE)
-
-# summ4b <- as.data.frame(isct) %>% 
-#   group_by(CellID, TowYr) %>% 
-#   mutate(TowYrSrt = fun.cond1(TowYr),
-#          len5sum = rollapply(partLen, incr, sum, partial=TRUE, align = 'right'),
-#          dur5sum = rollapply(partDur, incr, sum, partial=TRUE, align = 'right'),
-#          uHAULID= rollapply(HAUL_ID, incr, FUN=function(x) length(unique(x)), partial=TRUE, align='right'),
-#          uDRVID= rollapply(DRVID, incr, FUN=function(x) length(unique(x)), partial=TRUE, align='right')
-#          ) %>%
-#   filter(!is.na(DRVID)) %>% 
-#   select(-HAUL_ID, -DRVID, -partLen, -partDur)
-
-summ4b <- as.data.frame(isct) %>% 
+summ5 <- as.data.frame(isct) %>% 
   group_by(CellID, TowYr, DRVID) %>% 
   summarise(sumLen = sum(partLen),
             sumDur = sum(partDur),
             cntTow = n_distinct(HAUL_ID)
-            )
-
-summ4c <- summ4b %>%
-  group_by(CellID, TowYr) %>% 
-  mutate(TowYrSrt = fun.cond1(TowYr),
-         len5sum = rollapply(sumLen, incr, sum, partial=TRUE, align = 'right'),
-         dur5sum = rollapply(sumDur, incr, sum, partial=TRUE, align = 'right'),
-         uHAULID= rollapply(cntTow, incr, sum, partial=TRUE, align = 'right'),
-         uDRVID= rollapply(DRVID, incr, FUN=function(x) length(unique(x)), partial=TRUE, align='right')
-         ) %>%
-  filter(!is.na(DRVID)) 
-# %>%
-#   select(-HAUL_ID, -DRVID, -partLen, -partDur)
-
-# End Stack Overflow work
-
-summ4c <- summ4b %>% 
-  group_by(CellID, TowYr) %>% 
-  summarise(sumLen = sum(len5sum),
-            sumDur = sum(dur5sum),
-            cntTow = n_distinct(HAUL_ID),
-            cntVes = max(ves5yrs)
   )
 
-pivVes5b <- summ4b %>% 
-  select(CellID, TowYr, ves5yrs) %>% 
-  pivot_wider(names_from = TowYr,
-              values_from = ves5yrs,
-              names_prefix = "ves") %>% 
-  select(CellID, sort(tidyselect::peek_vars())) %>% 
-  select_if(~!all(is.na(.)))
-##### End of Working code
+# Next two steps create a continguous series and fill in missing combinations of TowYr:CellID
+all_combs <- expand.grid(CellID=unique(summ5$CellID),
+                         # DRVID=unique(summ5$DRVID),
+                         TowYr=seq(min(summ5$TowYr), max(summ5$TowYr), by=1)
+                         )
+
+df <- merge(summ5, all_combs, by=c('CellID', 'TowYr'), all=TRUE) %>%
+  mutate_if(is.numeric, funs(replace_na(., 0))) %>% 
+  select(CellID, TowYr, DRVID, sumLen, sumDur, cntTow)
+
+# WORKING, I think
+# wid <- incr * n_distinct(isct$DRVID) # Unique TowYr/DRVID
+wid <- incr * n_distinct(isct$CellID) # Unique TowYr/CellID
+summ6 <- df %>%
+  group_by(CellID) %>%
+  arrange(TowYr) %>% 
+  mutate(
+    TowYrSrt = fun.yrSrt(TowYr),
+    len5sum = rollapply(sumLen, width=wid, sum, partial=TRUE, align='right'),
+    dur5sum = rollapply(sumDur, width=wid, sum, partial=TRUE, align='right'),
+    tow5sum = rollapply(cntTow, width=wid, sum, partial=TRUE, align='right'),
+    ves5sum = rollapply(DRVID, width=wid, FUN=function(x) length(unique(x[!is.na(x)])), partial=TRUE, align='right')
+  ) %>%
+  select(CellID, TowYr, TowYrSrt, ves5sum, tow5sum, len5sum, dur5sum)
+
+# Return only the last (right-aligned) row of each unique CellID/5-yr combination, using max # of tows
+summ7 <- summ6 %>% 
+  group_by(CellID, TowYr) %>% 
+  filter(tow5sum == max(tow5sum))
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
-pivLen5 <- summ4 %>% 
-  select(-len5mean, -dur5sum, -dur5mean, -tow5sum, -ves5yrs) %>% 
+pivVes5 <- summ7 %>% 
+  select(CellID, TowYr, TowYrSrt, ves5sum) %>% 
+  pivot_wider(names_from = c(TowYrSrt, TowYr),
+              values_from = ves5sum,
+              names_prefix = "ves") %>% 
+  select(CellID, sort(tidyselect::peek_vars())) %>% 
+  arrange(CellID) %>% 
+  select_if(~!all(is.na(.)))
+
+pivLen5 <- summ7 %>% 
+  select(CellID, TowYr, TowYrSrt, len5sum) %>% 
   pivot_wider(names_from = c(TowYrSrt, TowYr),
               names_sep = "_",
               values_from = len5sum,
               names_prefix = "len") %>% 
   select(CellID, sort(tidyselect::peek_vars())) %>%
+  arrange(CellID) %>% 
   select_if(~!all(is.na(.)))
 
-pivDur5 <- summ4 %>% 
-  select(-len5sum, -len5mean, -dur5mean, -tow5sum, -ves5yrs) %>% 
+pivDur5 <- summ7 %>% 
+  select(CellID, TowYr, TowYrSrt, dur5sum) %>% 
   pivot_wider(names_from = c(TowYrSrt, TowYr),
               names_sep = "_",
               values_from = dur5sum,
               names_prefix = "dur") %>% 
   select(CellID, sort(tidyselect::peek_vars())) %>% 
-  select_if(~!all(is.na(.)))
-
-pivVes5 <- summ4 %>% 
-  select(-len5sum, -len5mean, -dur5sum, -dur5mean, -tow5sum) %>% 
-  pivot_wider(names_from = c(TowYrSrt, TowYr),
-              names_sep = "_",
-              values_from = ves5yrs,
-              names_prefix = "ves") %>% 
-  select(CellID, sort(tidyselect::peek_vars())) %>% 
+  arrange(CellID) %>% 
   select_if(~!all(is.na(.)))
 
 # Join 3 tables (Vessel Counts, Cell Lengths, Cell Durations) for 5-yr summary
@@ -251,22 +267,48 @@ jn5yr <- pivVes5 %>%
   full_join(pivDur5, by = "CellID") %>% 
   mutate(CellSz = grdSz) %>% 
   select(CellSz, CellID, everything()) %>% 
-  filter_at(vars(-CellSz, -CellID), any_vars(!is.na(.))) 
+  filter_at(vars(-CellSz, -CellID), any_vars(!is.na(.)))
 
 # Output to CSV files for later joining to polygon features
 # OR join here and output to FileGDB using st_write
 setwd(paste0(dir, "/Data"))
 fp <- paste0("LB", substring(yrSrt, 3, 4), substring(yrEnd, 3, 4), "_summ", grdSz)
+log <- paste0(fp, "_log.txt")
 
 write.csv(jn1yr, 
           file = paste0(fp, "_1yr_dat.csv"), 
-          na = "0")
+          # na = "0"
+          )
 write.csv(jn5yr, 
           file = paste0(fp, "_", incr, "yr_dat.csv"), 
-          na = "0")
+          # na = "0"
+          )
 write.csv(summ3, 
           file = paste0(fp, "_1yr_summ.csv"), 
-          na = "0")
+          # na = "0"
+          )
+
+# Check output for errors in vessel counts
+fld1 <- paste0("ves", yrSrt, "_", yrSrt+incr-1)
+fld2 <- paste0("ves", yrSrt, "_", yrSrt+incr-2)
+fld3 <- paste0("ves", yrSrt, "_", yrSrt+incr-3)
+fld4 <- paste0("ves", yrSrt, "_", yrSrt+incr-4)
+fld5 <- paste0("ves", yrSrt, "_", yrSrt+incr-5)
+erck5 <- jn5yr %>% 
+  filter(fld1 < fld2 
+         | fld2 < fld3 
+         | fld3 < fld4
+         | fld4 < fld5
+  )
+
+# Write results of error check to log file ##NOT writing to log file
+sink(file = log)
+if(nrow(erck5) == 0){
+  cat(print("data check: OK"))
+}else{
+  cat(print("data check: BAD!!"))
+}
+sink()
 
 toc(log = TRUE, quiet = TRUE) # End subclock
 log.txt <- tic.log(format = TRUE)
@@ -274,7 +316,6 @@ toc(log = TRUE, quiet = TRUE) # End clock
 log.txt <- tic.log(format = TRUE)
 
 # Write elapsed code section times to log file
-log <- paste0(fp, "_log.txt")
 fileConn <- file(log)
 writeLines(unlist(log.txt), con = fileConn)
 close(fileConn)
