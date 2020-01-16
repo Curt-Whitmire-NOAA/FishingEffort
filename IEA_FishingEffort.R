@@ -1,6 +1,6 @@
 # Script:   IEA_FishingEffort.R
 # Author:   Curt Whitmire (NOAA Fisheries)
-# Date:     6 Jan 2020
+# Date:     15 Jan 2020
 # Purpose:  Summarize fishing effort, represented by line features, into
 #           Cartesian grids of specified size.
 #           Summarize by 1-yr and 5-yr increments
@@ -28,7 +28,6 @@ tic("data preparation") # Start the subclock
 
 # Set working directory
 # dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
-library(rstudioapi)
 current_path <- getActiveDocumentContext()$path
 # setwd(dirname(current_path))
 dir <- dirname(current_path)
@@ -51,7 +50,7 @@ grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Include as user input
 grdSz <- substring(colnames(grd)[4], 8)
 
 # Filter for desired year range and Update attribute table
-yrSrt <- 2014 # Include as user input
+yrSrt <- 2012 # Include as user input
 yrEnd <- 2018 # Include as user input
 
 tlTM <- tlTMfc %>% 
@@ -137,7 +136,6 @@ jn1yr <- pivVes %>%
   select(CellSz, CellID, everything())
 
 # Create summary table by 5-yr increments
-# Need to modify code to first select 5-yr data, then calculate n_distinct(DRVID), then summarise. Maybe use lapply for all overlapping 5-yr windows
 incr = 5 # Include as user input
 fun.prop <- function(x) sum(x > 2) / incr
 fun.yrSrt <- function(x){ ifelse(x < (yrSrt+incr), yrSrt, x - incr + 1) }
@@ -191,7 +189,7 @@ fun.yrSrt <- function(x){ ifelse(x < (yrSrt+incr), yrSrt, x - incr + 1) }
 #   select_if(~!all(is.na(.)))
 #### End of OLD method that summarizes number of years where # unique vessels > 2
 
-#### Start of Working code for calculating # of distinct vessels in 5-yr periods
+#### Start of CURRENT method for calculating # of distinct vessels in 5-yr periods
 # from:
 # https://stackoverflow.com/questions/41183693/r-rolling-sliding-window-and-distinct-count-in-r-for-sliding-number-of-days
 summ5 <- as.data.frame(isct) %>% 
@@ -203,7 +201,6 @@ summ5 <- as.data.frame(isct) %>%
 
 # Next two steps create a continguous series and fill in missing combinations of TowYr:CellID
 all_combs <- expand.grid(CellID=unique(summ5$CellID),
-                         # DRVID=unique(summ5$DRVID),
                          TowYr=seq(min(summ5$TowYr), max(summ5$TowYr), by=1)
                          )
 
@@ -211,8 +208,7 @@ df <- merge(summ5, all_combs, by=c('CellID', 'TowYr'), all=TRUE) %>%
   mutate_if(is.numeric, funs(replace_na(., 0))) %>% 
   select(CellID, TowYr, DRVID, sumLen, sumDur, cntTow)
 
-# WORKING, I think
-# wid <- incr * n_distinct(isct$DRVID) # Unique TowYr/DRVID
+# Use rollapply funtion ('zoo' package) to calculate rolling sum and # of unique vessel IDs
 wid <- incr * n_distinct(isct$CellID) # Unique TowYr/CellID
 summ6 <- df %>%
   group_by(CellID) %>%
@@ -229,7 +225,8 @@ summ6 <- df %>%
 # Return only the last (right-aligned) row of each unique CellID/5-yr combination, using max # of tows
 summ7 <- summ6 %>% 
   group_by(CellID, TowYr) %>% 
-  filter(tow5sum == max(tow5sum))
+  filter(tow5sum == max(tow5sum)) %>%
+  filter(TowYr - TowYrSrt >= incr - 1)
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
 pivVes5 <- summ7 %>% 
@@ -269,46 +266,38 @@ jn5yr <- pivVes5 %>%
   select(CellSz, CellID, everything()) %>% 
   filter_at(vars(-CellSz, -CellID), any_vars(!is.na(.)))
 
+# Check output for errors in vessel counts
+# Only works if 2nd filter on summ7 above is removed
+# fld1 <- paste0("ves", yrSrt, "_", yrSrt+incr-1)
+# fld2 <- paste0("ves", yrSrt, "_", yrSrt+incr-2)
+# fld3 <- paste0("ves", yrSrt, "_", yrSrt+incr-3)
+# fld4 <- paste0("ves", yrSrt, "_", yrSrt+incr-4)
+# fld5 <- paste0("ves", yrSrt, "_", yrSrt+incr-5)
+# erck5 <- jn5yr %>%
+#   filter(fld1 < fld2
+#          | fld2 < fld3
+#          | fld3 < fld4
+#          | fld4 < fld5)
+
 # Output to CSV files for later joining to polygon features
 # OR join here and output to FileGDB using st_write
 setwd(paste0(dir, "/Data"))
 fp <- paste0("LB", substring(yrSrt, 3, 4), substring(yrEnd, 3, 4), "_summ", grdSz)
 log <- paste0(fp, "_log.txt")
+err_log <- paste0(fp, "_errCk.txt")
 
 write.csv(jn1yr, 
           file = paste0(fp, "_1yr_dat.csv"), 
-          # na = "0"
+          na = "0"
           )
 write.csv(jn5yr, 
           file = paste0(fp, "_", incr, "yr_dat.csv"), 
-          # na = "0"
+          na = "0"
           )
 write.csv(summ3, 
           file = paste0(fp, "_1yr_summ.csv"), 
           # na = "0"
           )
-
-# Check output for errors in vessel counts
-fld1 <- paste0("ves", yrSrt, "_", yrSrt+incr-1)
-fld2 <- paste0("ves", yrSrt, "_", yrSrt+incr-2)
-fld3 <- paste0("ves", yrSrt, "_", yrSrt+incr-3)
-fld4 <- paste0("ves", yrSrt, "_", yrSrt+incr-4)
-fld5 <- paste0("ves", yrSrt, "_", yrSrt+incr-5)
-erck5 <- jn5yr %>% 
-  filter(fld1 < fld2 
-         | fld2 < fld3 
-         | fld3 < fld4
-         | fld4 < fld5
-  )
-
-# Write results of error check to log file ##NOT writing to log file
-sink(file = log)
-if(nrow(erck5) == 0){
-  cat(print("data check: OK"))
-}else{
-  cat(print("data check: BAD!!"))
-}
-sink()
 
 toc(log = TRUE, quiet = TRUE) # End subclock
 log.txt <- tic.log(format = TRUE)
