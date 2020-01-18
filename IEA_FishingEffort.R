@@ -1,6 +1,6 @@
 # Script:   IEA_FishingEffort.R
 # Author:   Curt Whitmire (NOAA Fisheries)
-# Date:     15 Jan 2020
+# Date:     17 Jan 2020
 # Purpose:  Summarize fishing effort, represented by line features, into
 #           Cartesian grids of specified size.
 #           Summarize by 1-yr and 5-yr increments
@@ -50,7 +50,7 @@ grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Include as user input
 grdSz <- substring(colnames(grd)[4], 8)
 
 # Filter for desired year range and Update attribute table
-yrSrt <- 2012 # Include as user input
+yrSrt <- 2010 # Include as user input
 yrEnd <- 2018 # Include as user input
 
 tlTM <- tlTMfc %>% 
@@ -201,32 +201,45 @@ summ5 <- as.data.frame(isct) %>%
 
 # Next two steps create a continguous series and fill in missing combinations of TowYr:CellID
 all_combs <- expand.grid(CellID=unique(summ5$CellID),
+                         DRVID=unique(summ5$DRVID),
                          TowYr=seq(min(summ5$TowYr), max(summ5$TowYr), by=1)
                          )
 
-df <- merge(summ5, all_combs, by=c('CellID', 'TowYr'), all=TRUE) %>%
-  mutate_if(is.numeric, funs(replace_na(., 0))) %>% 
+df <- merge(summ5, all_combs, by=c('CellID', 'DRVID', 'TowYr'), all=TRUE) %>%
+  mutate_if(is.numeric, funs(replace_na(., 0))) %>%
+  mutate(DRVID = if_else(cntTow != 0, DRVID, factor(NA))) %>% 
   select(CellID, TowYr, DRVID, sumLen, sumDur, cntTow)
+  
 
 # Use rollapply funtion ('zoo' package) to calculate rolling sum and # of unique vessel IDs
-wid <- incr * n_distinct(isct$CellID) # Unique TowYr/CellID
+# wid <- incr * n_distinct(isct$CellID) # Unique TowYr/CellID
+# wid <- n_distinct(isct$TowYr) * n_distinct(isct$CellID) # Unique TowYr/CellID
+wid <- incr * n_distinct(isct$DRVID)
+# wid <- incr
 summ6 <- df %>%
   group_by(CellID) %>%
-  arrange(TowYr) %>% 
+  arrange(CellID, TowYr, DRVID) %>% 
   mutate(
     TowYrSrt = fun.yrSrt(TowYr),
     len5sum = rollapply(sumLen, width=wid, sum, partial=TRUE, align='right'),
     dur5sum = rollapply(sumDur, width=wid, sum, partial=TRUE, align='right'),
     tow5sum = rollapply(cntTow, width=wid, sum, partial=TRUE, align='right'),
-    ves5sum = rollapply(DRVID, width=wid, FUN=function(x) length(unique(x[!is.na(x)])), partial=TRUE, align='right')
-  ) %>%
+    # ves5sum = rollapply(DRVID, width=wid, FUN=function(x) length(unique(x[!is.na(x)])), partial=TRUE, align='right'),
+    ves5sum = rollapply(DRVID, width=wid, FUN=function(x) n_distinct(x, na.rm=TRUE), partial=TRUE, align='right')
+    ) %>%
   select(CellID, TowYr, TowYrSrt, ves5sum, tow5sum, len5sum, dur5sum)
+
+# Test filter of a single CellID
+# summ6b <- summ6 %>% 
+#   filter(CellID == 761)
 
 # Return only the last (right-aligned) row of each unique CellID/5-yr combination, using max # of tows
 summ7 <- summ6 %>% 
   group_by(CellID, TowYr) %>% 
-  filter(tow5sum == max(tow5sum)) %>%
-  filter(TowYr - TowYrSrt >= incr - 1)
+  filter(row_number()==n()) %>% # return only last row number in series
+  filter(TowYr - TowYrSrt >= incr - 1) # filter out first set of summaries that don't encompass specified incr of years
+# %>% 
+#   filter(tow5sum == max(tow5sum), !is.na(DRVID)) 
 
 # Use tidyr pivot_wider create wide data frames for 5-yr summary
 pivVes5 <- summ7 %>% 
