@@ -49,6 +49,8 @@ if (exists("tlTMfc")) {
 grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Include as user input
 grdSz <- substring(colnames(grd)[4], 8)
 
+hab <- sf::st_read(dsn=gdb, layer = "SGH_v4_0_flat_Bizzarro_ply_TM") # Include as user input
+
 # Filter for desired year range and Update attribute table
 yrSrt <- 2010 # Include as user input
 yrEnd <- 2018 # Include as user input
