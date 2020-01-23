@@ -27,10 +27,10 @@ tic("total") # Start the clock
 tic("data preparation") # Start the subclock
 
 # Set working directory
-# dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
-current_path <- getActiveDocumentContext()$path
+dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
+# current_path <- getActiveDocumentContext()$path
 # setwd(dirname(current_path))
-dir <- dirname(current_path)
+# dir <- dirname(current_path)
 
 # Import feature classes and set input variables
 gdb <- paste0(dir, "/", "IEA_FishingEffort_through2018.gdb")
@@ -48,8 +48,6 @@ if (exists("tlTMfc")) {
 
 grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Include as user input
 grdSz <- substring(colnames(grd)[4], 8)
-
-hab <- sf::st_read(dsn=gdb, layer = "SGH_v4_0_flat_Bizzarro_ply_TM") # Include as user input
 
 # Filter for desired year range and Update attribute table
 yrSrt <- 2010 # Include as user input
@@ -199,7 +197,7 @@ summ5 <- as.data.frame(isct) %>%
   summarise(sumLen = sum(partLen),
             sumDur = sum(partDur),
             cntTow = n_distinct(HAUL_ID)
-  )
+            )
 
 # Next two steps create a continguous series and fill in missing combinations of TowYr:CellID
 all_combs <- expand.grid(CellID=unique(summ5$CellID),
@@ -294,6 +292,30 @@ jn5yr <- pivVes5 %>%
 #          | fld3 < fld4
 #          | fld4 < fld5)
 
+# Import strata and habitat polygon feature class
+# strata <- sf::st_read(dsn=gdb, layer = "Strata_Final_TM_WGS84_5") # Include as user input
+hab <- sf::st_read(dsn=gdb, layer = "Strata_idenSGH_v4_flat_Bizzarro_dissPhyTyp_SubRegion_HabTyp_multi") # Include as user input
+
+# Clean up topology errors
+library(rgeos)
+hab_cln <- st_buffer(hab, 0)
+
+# Calculate intersection of towlines within Grid Cells
+isctHab <- st_intersection(tlTM, hab_cln) %>% 
+  mutate(partLen = st_length(.),
+         propLen = partLen/origLen,
+         partDur = propLen*DUR) %>% 
+  select(TowYr, HAUL_ID, DRVID, DRVIDINT, partLen, partDur, SubRegion, PhysType, HabType)
+
+# Summarize by TowYr, sub-region, depth strata and habitat type, and tally total effort (km, hrs) and # unique vessels
+summ8 <- as.data.frame(isctHab) %>% 
+  group_by(TowYr, SubRegion, PhysType, HabType) %>% 
+  summarise(Length_km = sum(partLen) / 1000,
+            Durat_hr = sum(partDur),
+            numVessels = n_distinct(DRVID),
+            numHauls = n_distinct(HAUL_ID)
+            )
+
 # Output to CSV files for later joining to polygon features
 # OR join here and output to FileGDB using st_write
 setwd(paste0(dir, "/Data"))
@@ -311,6 +333,11 @@ write.csv(jn5yr,
           )
 write.csv(summ3, 
           file = paste0(fp, "_1yr_summ.csv"), 
+          # na = "0"
+          )
+
+write.csv(summ8, 
+          file = paste0("LB", substring(yrSrt, 3, 4), substring(yrEnd, 3, 4), "_1yr_hab_dat.csv"), 
           # na = "0"
           )
 
