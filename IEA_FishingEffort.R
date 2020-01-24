@@ -301,6 +301,8 @@ library(rgeos)
 hab_cln <- st_buffer(hab, 0)
 
 # Calculate intersection of towlines within Grid Cells
+# Depending on the # of years chosen, this process can take several hours
+# Suggest separating processing this using an apply function on each year
 isctHab <- st_intersection(tlTM, hab_cln) %>% 
   mutate(partLen = st_length(.),
          propLen = partLen/origLen,
