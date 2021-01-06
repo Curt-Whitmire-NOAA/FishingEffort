@@ -22,7 +22,7 @@ package.check <- lapply(packages, FUN = function(x) {
 # Verify all required packages are loaded
 search()
 
-titic.clearlog()
+tic.clearlog()
 tic("total") # Start the clock
 tic("data preparation") # Start the subclock
 
