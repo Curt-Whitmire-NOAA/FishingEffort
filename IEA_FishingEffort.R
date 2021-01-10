@@ -1,6 +1,6 @@
 # Script:   IEA_FishingEffort.R
 # Author:   Curt Whitmire (NOAA Fisheries)
-# Date:     17 Jan 2020
+# Date:     10 Jan 2021
 # Purpose:  Summarize fishing effort, represented by line features, into
 #           Cartesian grids of specified size.
 #           Summarize by 1-yr and 5-yr increments
@@ -33,25 +33,28 @@ dir <- "/Users/curt.whitmire/Documents/GIS/IEA/FishingEffort"
 # dir <- dirname(current_path)
 
 # Import feature classes and set input variables
-gdb <- paste0(dir, "/", "IEA_FishingEffort_through2018.gdb")
+gdb <- paste0(dir, "/", "IEA_FishingEffort_through2019.gdb")
 
+# Check if feature class already exists in memory
 if (exists("tlTMfc")) {
 } else {
-  tlTMfc <- sf::st_read(dsn=gdb, layer = "LB0218_TL_Final_TM_merge")
+  tlTMfc <- sf::st_read(dsn=gdb, layer = "LB_TL_0219_TM")
 }
+st_crs(tlTMfc) # Verify projection is "WGS_1984_Transverse_Mercator"
   
-# library(smoothr) # for densifying unprojected lines
-# tl_dd <- sf::st_read(dsn=gdb, layer = "LB0218_TL_Final") # Read in unprojected line fc
+# library(smoothr) # for densifying unprojected lines; !!probably best to project in ArcGIS to ensure consistent projection properties
+# tl_dd <- sf::st_read(dsn=gdb, layer = "LB_TL_0219") # Read in unprojected line fc
 # tl_dens <- smoothr::densify(tl_dd, max_distance = 0.001) # Add vertices to preserve shape during reprojection
 # projcrs <- "+proj=tmerc +lat_0=31.96 +lon_0=-121.6 +k=1 +x_0=390000 +y_0=0 +datum=WGS84 +units=m +no_defs"
 # tlTMfc <- st_transform(x=tl_dens, crs=projcrs) # Project haul data to TM spatial object
+# st_crs(tlTMfc) # Check projection status
 
 grd <- sf::st_read(dsn=gdb, layer = "grid20km_ETsquare") # Include as user input
-grdSz <- substring(colnames(grd)[4], 8)
+grdSz <- substring(colnames(grd)[2], 8)
 
 # Filter for desired year range and Update attribute table
 yrSrt <- 2010 # Include as user input
-yrEnd <- 2018 # Include as user input
+yrEnd <- 2019 # Include as user input
 
 tlTM <- tlTMfc %>% 
   mutate(
@@ -199,7 +202,7 @@ summ5 <- as.data.frame(isct) %>%
             cntTow = n_distinct(HAUL_ID)
             )
 
-# Next two steps create a continguous series and fill in missing combinations of TowYr:CellID
+# Next two steps create a continuous series and fill in missing combinations of TowYr:CellID
 all_combs <- expand.grid(CellID=unique(summ5$CellID),
                          DRVID=unique(summ5$DRVID),
                          TowYr=seq(min(summ5$TowYr), max(summ5$TowYr), by=1)
@@ -207,7 +210,7 @@ all_combs <- expand.grid(CellID=unique(summ5$CellID),
 
 df <- merge(summ5, all_combs, by=c('CellID', 'DRVID', 'TowYr'), all=TRUE) %>%
   mutate_if(is.numeric, funs(replace_na(., 0))) %>%
-  mutate(DRVID = if_else(cntTow != 0, DRVID, factor(NA))) %>% 
+  mutate(DRVID = if_else(cntTow != 0, DRVID, NA_character_)) %>% 
   select(CellID, TowYr, DRVID, sumLen, sumDur, cntTow)
   
 
